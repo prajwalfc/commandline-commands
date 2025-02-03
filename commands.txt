@@ -1,0 +1,7 @@
+## find a process to using a specified port
+
+sudo lsof -i tcp:8080
+
+kill a process 
+
+kill -9 <process number>
