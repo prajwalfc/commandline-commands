@@ -1,0 +1,315 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM ============================================================
+REM  Maven Multi-Project Builder (Windows BAT)
+REM  - Finds projects (subfolders) containing pom.xml
+REM  - Build all sequential OR pick one OR pick multiple in order
+REM ============================================================
+
+REM --- Root directory containing project folders ---
+REM By default: the folder where this .bat file lives
+set "ROOT=%~dp0"
+
+REM --- Maven command configuration ---
+REM If mvn is on PATH, keep as "mvn"
+set "MVN=mvn"
+
+REM Optional: specify settings.xml (leave empty if not needed)
+set "MVN_SETTINGS="
+
+REM Default Maven goals/phases
+set "MVN_GOALS=clean install"
+
+REM Extra Maven args (examples: -DskipTests, -U, -T 1C, -Pprofile)
+set "MVN_ARGS="
+
+REM If 1: stop at first failure. If 0: continue and report at end.
+set "FAIL_FAST=1"
+
+echo.
+echo ============================================================
+echo   Maven Multi-Project Builder
+echo   ROOT: %ROOT%
+echo ============================================================
+echo.
+
+REM --- Collect projects (subfolders with pom.xml directly inside) ---
+set "count=0"
+
+for /d %%D in ("%ROOT%*") do (
+    if exist "%%~fD\pom.xml" (
+        set /a count+=1
+        set "proj[!count!]=%%~fD"
+        set "name[!count!]=%%~nxD"
+    )
+)
+
+if %count%==0 (
+    echo No Maven projects found under: %ROOT%
+    echo (Expected: each project folder contains pom.xml directly inside it)
+    echo.
+    pause
+    exit /b 1
+)
+
+REM --- Menu ---
+:MENU
+echo Found %count% project(s):
+echo.
+for /l %%i in (1,1,%count%) do (
+    echo   %%i. !name[%%i]!
+)
+echo.
+echo   A. Build ALL (sequential)
+echo   M. Build MULTIPLE (choose order)
+echo   S. Settings (goals/args/root)
+echo   Q. Quit
+echo.
+
+set "choice="
+set /p choice="Select option (number/A/M/S/Q): "
+
+if /i "%choice%"=="Q" exit /b 0
+if /i "%choice%"=="A" goto BUILD_ALL
+if /i "%choice%"=="M" goto BUILD_MULTIPLE
+if /i "%choice%"=="S" goto SETTINGS
+
+REM If numeric, build one
+for /f "delims=0123456789" %%x in ("%choice%") do (
+    if not "%%x"=="" (
+        echo Invalid input: %choice%
+        echo.
+        goto MENU
+    )
+)
+
+if "%choice%"=="" goto MENU
+if %choice% GEQ 1 if %choice% LEQ %count% (
+    call :BUILD_ONE %choice%
+    echo.
+    pause
+    goto MENU
+)
+
+echo Invalid selection: %choice%
+echo.
+goto MENU
+
+REM ============================================================
+REM Build ALL sequential
+REM ============================================================
+:BUILD_ALL
+echo.
+echo ---- Building ALL projects (sequential) ----
+call :PRINT_MVN_CONFIG
+echo.
+
+set "failed="
+for /l %%i in (1,1,%count%) do (
+    call :BUILD_ONE %%i
+    if errorlevel 1 (
+        set "failed=!failed! %%i"
+        if "%FAIL_FAST%"=="1" (
+            echo.
+            echo FAIL-FAST enabled. Stopping.
+            echo Failed at: %%i. !name[%%i]!
+            echo.
+            pause
+            goto MENU
+        )
+    )
+)
+
+echo.
+if defined failed (
+    echo Build finished with failures at index(es):%failed%
+) else (
+    echo Build finished successfully.
+)
+echo.
+pause
+goto MENU
+
+REM ============================================================
+REM Build MULTIPLE in an order you choose
+REM Input example: 3 1 5 2
+REM ============================================================
+:BUILD_MULTIPLE
+echo.
+echo Enter project numbers in the order to build.
+echo Example: 3 1 5
+echo (Use spaces or commas)
+echo.
+set "list="
+set /p list="Build order: "
+
+if "%list%"=="" goto MENU
+
+REM Normalize commas to spaces
+set "list=%list:,= %"
+
+echo.
+echo ---- Building selected projects (sequential) ----
+call :PRINT_MVN_CONFIG
+echo.
+
+set "failed="
+for %%k in (%list%) do (
+    REM validate numeric
+    for /f "delims=0123456789" %%x in ("%%k") do (
+        if not "%%x"=="" (
+            echo Skipping invalid token: %%k
+            goto NEXT_TOKEN
+        )
+    )
+
+    if %%k GEQ 1 if %%k LEQ %count% (
+        call :BUILD_ONE %%k
+        if errorlevel 1 (
+            set "failed=!failed! %%k"
+            if "%FAIL_FAST%"=="1" (
+                echo.
+                echo FAIL-FAST enabled. Stopping.
+                echo Failed at: %%k. !name[%%k]!
+                echo.
+                pause
+                goto MENU
+            )
+        )
+    ) else (
+        echo Skipping out-of-range index: %%k
+    )
+
+    :NEXT_TOKEN
+)
+
+echo.
+if defined failed (
+    echo Selected build finished with failures at index(es):%failed%
+) else (
+    echo Selected build finished successfully.
+)
+echo.
+pause
+goto MENU
+
+REM ============================================================
+REM Settings menu (root, goals, args, settings.xml, fail-fast)
+REM ============================================================
+:SETTINGS
+echo.
+echo Current configuration:
+call :PRINT_MVN_CONFIG
+echo.
+echo 1. Change ROOT directory
+echo 2. Change Maven goals (currently: %MVN_GOALS%)
+echo 3. Change Maven args  (currently: %MVN_ARGS%)
+echo 4. Set/clear settings.xml (currently: %MVN_SETTINGS%)
+echo 5. Toggle FAIL_FAST (currently: %FAIL_FAST%)
+echo B. Back
+echo.
+
+set "sopt="
+set /p sopt="Choose: "
+
+if /i "%sopt%"=="B" goto MENU
+
+if "%sopt%"=="1" (
+    set "newroot="
+    set /p newroot="Enter ROOT (full path, e.g. C:\work\repos\): "
+    if not "%newroot%"=="" (
+        set "ROOT=%newroot%"
+        if not "%ROOT:~-1%"=="\" set "ROOT=%ROOT%\"
+        echo ROOT updated to: %ROOT%
+        echo.
+        REM re-scan projects
+        set "count=0"
+        for /d %%D in ("%ROOT%*") do (
+            if exist "%%~fD\pom.xml" (
+                set /a count+=1
+                set "proj[!count!]=%%~fD"
+                set "name[!count!]=%%~nxD"
+            )
+        )
+        if %count%==0 (
+            echo No Maven projects found under: %ROOT%
+            echo Reverting to menu.
+            echo.
+        )
+    )
+    goto MENU
+)
+
+if "%sopt%"=="2" (
+    set "MVN_GOALS="
+    set /p MVN_GOALS="Enter Maven goals (e.g. clean install): "
+    if "%MVN_GOALS%"=="" set "MVN_GOALS=clean install"
+    goto MENU
+)
+
+if "%sopt%"=="3" (
+    set "MVN_ARGS="
+    set /p MVN_ARGS="Enter Maven args (e.g. -DskipTests -U): "
+    goto MENU
+)
+
+if "%sopt%"=="4" (
+    set "MVN_SETTINGS="
+    set /p MVN_SETTINGS="Enter full path to settings.xml (blank to clear): "
+    goto MENU
+)
+
+if "%sopt%"=="5" (
+    if "%FAIL_FAST%"=="1" (set "FAIL_FAST=0") else (set "FAIL_FAST=1")
+    goto MENU
+)
+
+goto MENU
+
+REM ============================================================
+REM Build one project by index
+REM ============================================================
+:BUILD_ONE
+set "idx=%~1"
+set "dir=!proj[%idx%]!"
+set "nm=!name[%idx%]!"
+
+echo.
+echo ============================================================
+echo [%idx%/%count%] Building: %nm%
+echo Directory: %dir%
+echo ============================================================
+
+pushd "%dir%" >nul
+
+set "settingsArg="
+if not "%MVN_SETTINGS%"=="" (
+    set "settingsArg=-s "%MVN_SETTINGS%""
+)
+
+REM Run Maven
+%MVN% %settingsArg% %MVN_GOALS% %MVN_ARGS%
+set "rc=%ERRORLEVEL%"
+
+popd >nul
+
+if not "%rc%"=="0" (
+    echo ERROR: Build failed for %nm% (exit code %rc%)
+    exit /b %rc%
+)
+
+echo OK: %nm% built successfully.
+exit /b 0
+
+REM ============================================================
+REM Helper print config
+REM ============================================================
+:PRINT_MVN_CONFIG
+echo MVN         : %MVN%
+echo ROOT        : %ROOT%
+echo MVN_GOALS   : %MVN_GOALS%
+echo MVN_ARGS    : %MVN_ARGS%
+echo SETTINGS_XML: %MVN_SETTINGS%
+echo FAIL_FAST   : %FAIL_FAST%
+exit /b 0
