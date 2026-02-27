@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 REM ============================================================
 REM  Maven Multi-Project Builder (Windows BAT)
-REM  - Finds projects (subfolders) containing pom.xml
+REM  - Finds projects (direct child folders) containing pom.xml
 REM  - Build all sequential OR pick one OR pick multiple in order
 REM ============================================================
 
@@ -133,7 +133,7 @@ goto MENU
 
 REM ============================================================
 REM Build MULTIPLE in an order you choose
-REM Input example: 3 1 5 2
+REM Input example: 3 1 5 2  OR  3,1,5,2
 REM ============================================================
 :BUILD_MULTIPLE
 echo.
@@ -155,33 +155,34 @@ call :PRINT_MVN_CONFIG
 echo.
 
 set "failed="
-for %%k in (%list%) do (
-    REM validate numeric
-    for /f "delims=0123456789" %%x in ("%%k") do (
-        if not "%%x"=="" (
-            echo Skipping invalid token: %%k
-            goto NEXT_TOKEN
-        )
-    )
 
-    if %%k GEQ 1 if %%k LEQ %count% (
-        call :BUILD_ONE %%k
-        if errorlevel 1 (
-            set "failed=!failed! %%k"
-            if "%FAIL_FAST%"=="1" (
-                echo.
-                echo FAIL-FAST enabled. Stopping.
-                echo Failed at: %%k. !name[%%k]!
-                echo.
-                pause
-                goto MENU
+for %%k in (%list%) do (
+    set "tok=%%k"
+    set "valid=1"
+
+    REM validate numeric (if token contains any non-digit, mark invalid)
+    for /f "delims=0123456789" %%x in ("!tok!") do set "valid=0"
+
+    if "!valid!"=="1" (
+        if !tok! GEQ 1 if !tok! LEQ %count% (
+            call :BUILD_ONE !tok!
+            if errorlevel 1 (
+                set "failed=!failed! !tok!"
+                if "%FAIL_FAST%"=="1" (
+                    echo.
+                    echo FAIL-FAST enabled. Stopping.
+                    echo Failed at: !tok!. !name[!tok!]!
+                    echo.
+                    pause
+                    goto MENU
+                )
             )
+        ) else (
+            echo Skipping out-of-range index: !tok!
         )
     ) else (
-        echo Skipping out-of-range index: %%k
+        echo Skipping invalid token: %%k
     )
-
-    :NEXT_TOKEN
 )
 
 echo.
@@ -217,7 +218,7 @@ if /i "%sopt%"=="B" goto MENU
 
 if "%sopt%"=="1" (
     set "newroot="
-    set /p newroot="Enter ROOT (full path, e.g. C:\work\repos\): "
+    set /p newroot="Enter ROOT (full path, e.g. D:\repos\parent\): "
     if not "%newroot%"=="" (
         set "ROOT=%newroot%"
         if not "%ROOT:~-1%"=="\" set "ROOT=%ROOT%\"
